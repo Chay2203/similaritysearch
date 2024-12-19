@@ -1,12 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
-from typing import Union, List
+from pydantic import BaseModel
 import torch
 import clip
 from PIL import Image
 import io
-import numpy as np
 import requests
 from enum import Enum
 import base64
@@ -34,7 +32,7 @@ class EmbeddingRequest(BaseModel):
     input: str
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "type": "image_url",
                 "input": "https://example.com/image.jpg"

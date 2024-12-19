@@ -174,8 +174,8 @@ app.post('/search', async (req, res) => {
 
     const searchQuery = {
       vector: textEmbedding,
-      topK: value.per_page,
-      includeMetadata: true
+      topK: value.per_page * 4, 
+      includeMetadata: true,
     };
 
     if (Object.keys(value.filters).length > 0) {
@@ -192,27 +192,70 @@ app.post('/search', async (req, res) => {
 
     const searchResponse = await index.query(searchQuery);
 
-    const results = searchResponse.matches.map(match => ({
-      profile_id: match.id,
-      similarity_score: match.score,
-      metadata: match.metadata
-    }));
+    const scores = searchResponse.matches.map(m => m.score);
+    const maxScore = Math.max(...scores, 0);
+    const meanScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+    
+    let threshold = Math.max(
+      0.12, 
+      meanScore * 0.7 
+    );
 
-    const filteredResults = results.filter(match => match.similarity_score >= 0.3);
+    let results = searchResponse.matches
+      .map(match => ({
+        profile_id: match.id,
+        similarity_score: match.score,
+        metadata: match.metadata,
+        relative_score: match.score / maxScore 
+      }))
+      .filter(result => {
+        return result.similarity_score >= threshold || 
+               result.relative_score >= 0.7;
+      })
+      .sort((a, b) => b.similarity_score - a.similarity_score)
+      .slice(0, value.per_page);
 
-    if (filteredResults.length === 0) {
-      return res.json({
-        results: [],
-        message: "No matches found with sufficient confidence for the given query"
-      });
-    }
+    console.log({
+      query: value.text_query,
+      stats: {
+        maxScore,
+        meanScore,
+        threshold,
+        totalCandidates: searchResponse.matches.length,
+        filteredResults: results.length
+      },
+      allScores: scores.sort((a, b) => b - a).slice(0, 5), 
+      matches: results.map(r => ({
+        id: r.profile_id,
+        score: r.similarity_score.toFixed(4),
+        relative_score: r.relative_score.toFixed(4)
+      }))
+    });
 
-    await redis.setex(cacheKey, 300, JSON.stringify(filteredResults));
-    res.json(filteredResults);
+    const response = {
+      results: results.map(({ relative_score, ...rest }) => rest),
+      meta: {
+        total_candidates: searchResponse.matches.length,
+        filtered_count: results.length,
+        max_score: maxScore,
+        mean_score: meanScore,
+        threshold: threshold,
+        query: value.text_query
+      }
+    };
+
+    await redis.setex(cacheKey, 300, JSON.stringify(response));
+    res.json(response);
 
   } catch (error) {
     console.error('Error searching profiles:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      meta: {
+        query: req.body.text_query,
+        timestamp: new Date().toISOString()
+      }
+    });
   }
 });
 
