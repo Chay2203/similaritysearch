@@ -101,7 +101,6 @@ async def health_check():
         "model": "ViT-B/32"
     }
 
-# Example route to demonstrate usage
 @app.get("/examples")
 async def get_examples():
     return {
